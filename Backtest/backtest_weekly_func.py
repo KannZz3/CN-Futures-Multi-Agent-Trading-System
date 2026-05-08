@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Auto-split from the original single-contract notebooks.
+"""Backtest functions split from the original single-contract notebook.
 Core formulas, thresholds, and function bodies are kept unchanged.
 """
 
 import numpy as np
 import pandas as pd
-
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import matplotlib.ticker as mticker
 
 def backtest_money(
     df,
@@ -26,20 +27,20 @@ def backtest_money(
     wk_trend_col="wk_trend_sign",
     wk_vol_regime_col="wk_vol_regime",
     wk_crowded_long_col="wk_crowded_long",
+    wk_crowded_short_col="wk_crowded_short",
     block_vol_regime=2,
     allow_trend_zero_open=False,
 
-    # ====== Warehouse filter parameters ======
-    use_wh_filter=True,
-    wh_score_col="wh_factor",
-    wh_long_block_th=-0.2,
-    wh_short_block_th=0.2,
-
-    # ====== Basis filter parameters ======
-    use_basis_filter=True,
-    basis_score_col="basis_factor",
-    basis_long_block_th=-0.2,
-    basis_short_block_th=0.2,
+    # ====== Weekly filter construction parameters for plot display ======
+    vol_window=5,
+    trend_fast=4,
+    trend_slow=8,
+    crowd_lookback=5,
+    vol_z_low=-0.5,
+    vol_z_high=0.7,
+    trend_z_th=0.5,
+    crowd_hold_z_th=1.0,
+    crowd_price_z_th=0.5,
 
     # ====== Performance statistics parameters ======
     rf_annual=0.012,
@@ -94,17 +95,24 @@ def backtest_money(
     df["signal_raw"] = sig
     df["long_signal_raw"] = long_signal.astype(float)
     df["short_signal_raw"] = short_signal.astype(float)
+    df["both_signal_raw"] = both_signal.astype(float)
     df["long_strength"] = long_strength
     df["short_strength"] = short_strength
 
     # === 1.5) Apply weekly filters ===
     weekly_ok = pd.Series(True, index=df.index, dtype=bool)
 
+    df["weekly_block_trend"] = 0.0
+    df["weekly_block_vol"] = 0.0
+    df["weekly_block_crowded_long"] = 0.0
+    df["weekly_block_crowded_short"] = 0.0
+
     if use_weekly_filter:
         required_wk_cols = [
             wk_trend_col,
             wk_vol_regime_col,
             wk_crowded_long_col,
+            wk_crowded_short_col,
         ]
 
         missing_wk_cols = [c for c in required_wk_cols if c not in df.columns]
@@ -114,85 +122,46 @@ def backtest_money(
                 f"use_weekly_filter=True, but missing weekly columns: {missing_wk_cols}"
             )
 
-        trend = df[wk_trend_col]
-        vol_reg = df[wk_vol_regime_col]
-        crowded = df[wk_crowded_long_col]
+        trend = df[wk_trend_col].astype(float)
+        vol_reg = df[wk_vol_regime_col].astype(float)
+        crowded_long = df[wk_crowded_long_col].fillna(0.0).astype(float)
+        crowded_short = df[wk_crowded_short_col].fillna(0.0).astype(float)
 
         weekly_ok &= trend.notna()
         weekly_ok &= vol_reg.notna()
-        weekly_ok &= crowded.notna()
 
         if not allow_trend_zero_open:
-            weekly_ok &= (trend != 0)
+            trend_zero_block = (trend == 0) & (sig != 0)
+            weekly_ok &= ~trend_zero_block
+            df["weekly_block_trend"] = trend_zero_block.astype(float)
 
-        same_dir_or_zero = ((trend * sig) >= 0) | (sig == 0)
-        weekly_ok &= same_dir_or_zero.fillna(False)
+        wrong_trend_dir = ((trend * sig) < 0) & (sig != 0)
+        weekly_ok &= ~wrong_trend_dir
+        df["weekly_block_trend"] = (
+            (df["weekly_block_trend"] == 1.0) | wrong_trend_dir
+        ).astype(float)
 
-        high_vol_mask = (vol_reg == block_vol_regime)
-        weekly_ok &= ~(high_vol_mask & (sig != 0))
+        vol_block = (vol_reg == block_vol_regime) & (sig != 0)
+        weekly_ok &= ~vol_block
+        df["weekly_block_vol"] = vol_block.astype(float)
 
-        crowded = crowded.fillna(0.0)
-        weekly_block_long = (crowded >= 0.5) & (sig > 0)
-        weekly_ok &= ~weekly_block_long
+        crowded_long_block = (crowded_long >= 0.5) & (sig > 0)
+        crowded_short_block = (crowded_short >= 0.5) & (sig < 0)
 
-    # === 1.6) Apply warehouse filter ===
-    wh_ok = pd.Series(True, index=df.index, dtype=bool)
+        weekly_ok &= ~crowded_long_block
+        weekly_ok &= ~crowded_short_block
 
-    df["wh_block_long"] = 0.0
-    df["wh_block_short"] = 0.0
+        df["weekly_block_crowded_long"] = crowded_long_block.astype(float)
+        df["weekly_block_crowded_short"] = crowded_short_block.astype(float)
 
-    if use_wh_filter:
-        if wh_score_col not in df.columns:
-            raise ValueError(
-                f"use_wh_filter=True, but '{wh_score_col}' not found in df columns."
-            )
-
-        wh_score = df[wh_score_col].astype(float)
-
-        wh_block_long = (sig > 0) & (wh_score < wh_long_block_th)
-        wh_block_short = (sig < 0) & (wh_score > wh_short_block_th)
-
-        df["wh_block_long"] = wh_block_long.astype(float)
-        df["wh_block_short"] = wh_block_short.astype(float)
-
-        wh_ok &= wh_score.notna()
-        wh_ok &= ~(wh_block_long | wh_block_short)
-
-    # === 1.7) Apply basis filter ===
-    basis_ok = pd.Series(True, index=df.index, dtype=bool)
-
-    df["basis_block_long"] = 0.0
-    df["basis_block_short"] = 0.0
-
-    if use_basis_filter:
-        if basis_score_col not in df.columns:
-            raise ValueError(
-                f"use_basis_filter=True, but '{basis_score_col}' not found in df columns."
-            )
-
-        basis_score = df[basis_score_col].astype(float)
-
-        basis_block_long = (sig > 0) & (basis_score < basis_long_block_th)
-        basis_block_short = (sig < 0) & (basis_score > basis_short_block_th)
-
-        df["basis_block_long"] = basis_block_long.astype(float)
-        df["basis_block_short"] = basis_block_short.astype(float)
-
-        basis_ok &= basis_score.notna()
-        basis_ok &= ~(basis_block_long | basis_block_short)
-
-    # === 1.8) Final open-position filter ===
-    fund_ok = wh_ok & basis_ok
-    open_ok = weekly_ok & fund_ok
+    # === 1.6) Final open-position filter ===
+    open_ok = weekly_ok
 
     sig_eff = sig.copy()
     sig_eff[~open_ok] = 0.0
 
     df["signal_eff"] = sig_eff
     df["weekly_ok"] = weekly_ok.astype(float)
-    df["wh_ok"] = wh_ok.astype(float)
-    df["basis_ok"] = basis_ok.astype(float)
-    df["fund_ok"] = fund_ok.astype(float)
     df["open_ok"] = open_ok.astype(float)
 
     # === 2) Initialize strategy state ===
@@ -333,11 +302,15 @@ def backtest_money(
 
     exit_reason_counts = pd.Series(exit_reasons).value_counts().to_dict()
 
-    # === 6) Diagnostic statistics ===
+    # === 6) Weekly diagnostics for plotting / analysis ===
     active_signal_mask = df["signal_raw"] != 0
 
-    wh_block_any = (df["wh_block_long"] == 1) | (df["wh_block_short"] == 1)
-    basis_block_any = (df["basis_block_long"] == 1) | (df["basis_block_short"] == 1)
+    weekly_block_any = (
+        (df["weekly_block_trend"] == 1)
+        | (df["weekly_block_vol"] == 1)
+        | (df["weekly_block_crowded_long"] == 1)
+        | (df["weekly_block_crowded_short"] == 1)
+    )
 
     bt_stats = {
         "n_trades": n_trades,
@@ -348,35 +321,46 @@ def backtest_money(
         "sharpe_annual": sharpe_annual,
         "rf_annual": rf_annual,
         "annual_trading_days": annual_trading_days,
+
         "T_long": T_long,
         "T_short": T_short,
         "base_th": base_th,
         "long_score_col": long_score_col,
         "short_score_col": short_score_col,
 
+        # ===== Weekly settings for plot =====
         "use_weekly_filter": use_weekly_filter,
-        "use_wh_filter": use_wh_filter,
-        "use_basis_filter": use_basis_filter,
-        "wh_score_col": wh_score_col,
-        "basis_score_col": basis_score_col,
-        "wh_long_block_th": wh_long_block_th,
-        "wh_short_block_th": wh_short_block_th,
-        "basis_long_block_th": basis_long_block_th,
-        "basis_short_block_th": basis_short_block_th,
+        "wk_trend_col": wk_trend_col,
+        "wk_vol_regime_col": wk_vol_regime_col,
+        "wk_crowded_long_col": wk_crowded_long_col,
+        "wk_crowded_short_col": wk_crowded_short_col,
+        "block_vol_regime": block_vol_regime,
+        "allow_trend_zero_open": allow_trend_zero_open,
 
-        # Diagnostic counts
+        "vol_window": vol_window,
+        "trend_fast": trend_fast,
+        "trend_slow": trend_slow,
+        "crowd_lookback": crowd_lookback,
+        "vol_z_low": vol_z_low,
+        "vol_z_high": vol_z_high,
+        "trend_z_th": trend_z_th,
+        "crowd_hold_z_th": crowd_hold_z_th,
+        "crowd_price_z_th": crowd_price_z_th,
+
+        # ===== Signal diagnostics =====
         "raw_signal_count": int(active_signal_mask.sum()),
         "effective_signal_count": int((df["signal_eff"] != 0).sum()),
 
-        "wh_block_long_count": int(df["wh_block_long"].sum()),
-        "wh_block_short_count": int(df["wh_block_short"].sum()),
-        "wh_block_any_count": int(wh_block_any.sum()),
+        "long_signal_raw_count": int(df["long_signal_raw"].sum()),
+        "short_signal_raw_count": int(df["short_signal_raw"].sum()),
+        "both_signal_raw_count": int(df["both_signal_raw"].sum()),
 
-        "basis_block_long_count": int(df["basis_block_long"].sum()),
-        "basis_block_short_count": int(df["basis_block_short"].sum()),
-        "basis_block_any_count": int(basis_block_any.sum()),
+        "weekly_block_count": int((active_signal_mask & weekly_block_any).sum()),
+        "weekly_block_trend_count": int(df["weekly_block_trend"].sum()),
+        "weekly_block_vol_count": int(df["weekly_block_vol"].sum()),
+        "weekly_block_crowded_long_count": int(df["weekly_block_crowded_long"].sum()),
+        "weekly_block_crowded_short_count": int(df["weekly_block_crowded_short"].sum()),
 
-        "fund_block_count": int((active_signal_mask & (~fund_ok)).sum()),
         "open_block_count": int((active_signal_mask & (~open_ok)).sum()),
 
         "exit_reason_counts": exit_reason_counts,
@@ -386,6 +370,7 @@ def backtest_money(
     df.attrs["bt_stats"] = bt_stats
 
     return df
+
 
 def plot_backtest(
     bt_df,
@@ -403,13 +388,19 @@ def plot_backtest(
     sharpe     = stats.get("sharpe_annual", np.nan)
     rf_annual  = stats.get("rf_annual", 0.012)
 
-    use_basis_filter = stats.get("use_basis_filter", np.nan)
-    basis_long_th    = stats.get("basis_long_block_th", np.nan)
-    basis_short_th   = stats.get("basis_short_block_th", np.nan)
+    # ===== Weekly gate settings =====
+    use_weekly_filter = stats.get("use_weekly_filter", np.nan)
 
-    use_wh_filter = stats.get("use_wh_filter", np.nan)
-    wh_long_th    = stats.get("wh_long_block_th", np.nan)
-    wh_short_th   = stats.get("wh_short_block_th", np.nan)
+    vol_window       = stats.get("vol_window", np.nan)
+    trend_fast       = stats.get("trend_fast", np.nan)
+    trend_slow       = stats.get("trend_slow", np.nan)
+    crowd_lookback   = stats.get("crowd_lookback", np.nan)
+
+    vol_z_low        = stats.get("vol_z_low", np.nan)
+    vol_z_high       = stats.get("vol_z_high", np.nan)
+    trend_z_th       = stats.get("trend_z_th", np.nan)
+    crowd_hold_z_th  = stats.get("crowd_hold_z_th", np.nan)
+    crowd_price_z_th = stats.get("crowd_price_z_th", np.nan)
 
     win_rate_str = "N/A" if pd.isna(win_rate) else f"{win_rate * 100:.2f}%"
     sharpe_str   = "N/A" if pd.isna(sharpe) else f"{sharpe:.3f}"
@@ -420,8 +411,8 @@ def plot_backtest(
         if len(worst5_ret) > 0 else "N/A"
     )
 
-    def fmt_th(x):
-        return "N/A" if pd.isna(x) else f"{x:.2f}"
+    def fmt_num(x):
+        return "N/A" if pd.isna(x) else f"{x:g}"
 
     ret = (bt_df["equity"] - 1).dropna()
 
@@ -463,7 +454,7 @@ def plot_backtest(
 
     ax.legend(loc="upper left", frameon=False, title="Contract")
 
-    # ===== Right-side summary =====
+    # ===== Right-side backtest summary =====
     x_stats = 0.77
     y_top   = 0.87
     line_h  = 0.047
@@ -492,36 +483,45 @@ def plot_backtest(
     fig.text(x_stats, y_top - 7.4 * line_h,
              f"Annual Sharpe (rf={rf_str}): {sharpe_str}", fontsize=9)
 
+    # ===== Weekly Gate settings only =====
     fig.text(x_stats, y_top - 8.7 * line_h,
-             "Filter Settings", fontsize=9, fontweight="bold")
+             "Weekly Gate Settings", fontsize=9, fontweight="bold")
 
     fig.text(x_stats, y_top - 9.7 * line_h,
-             f"Basis filter: {use_basis_filter}", fontsize=8)
+             f"Weekly gate: {use_weekly_filter}", fontsize=8)
 
     fig.text(x_stats, y_top - 10.6 * line_h,
-             f"Basis th: L={fmt_th(basis_long_th)}, S={fmt_th(basis_short_th)}",
+             f"Vol window: {fmt_num(vol_window)}", fontsize=8)
+
+    fig.text(x_stats, y_top - 11.5 * line_h,
+             f"Trend MA: {fmt_num(trend_fast)}/{fmt_num(trend_slow)}", fontsize=8)
+
+    fig.text(x_stats, y_top - 12.4 * line_h,
+             f"Crowd lookback: {fmt_num(crowd_lookback)}", fontsize=8)
+
+    fig.text(x_stats, y_top - 13.3 * line_h,
+             f"Vol z range: [{fmt_num(vol_z_low)}, {fmt_num(vol_z_high)}]",
              fontsize=8)
 
-    fig.text(x_stats, y_top - 11.6 * line_h,
-             f"WH filter: {use_wh_filter}", fontsize=8)
+    fig.text(x_stats, y_top - 14.2 * line_h,
+             f"Trend z th: {fmt_num(trend_z_th)}", fontsize=8)
 
-    fig.text(x_stats, y_top - 12.5 * line_h,
-             f"WH th: L={fmt_th(wh_long_th)}, S={fmt_th(wh_short_th)}",
+    fig.text(x_stats, y_top - 15.1 * line_h,
+             f"Crowd z th: H={fmt_num(crowd_hold_z_th)}, P={fmt_num(crowd_price_z_th)}",
              fontsize=8)
 
-    fig.text(x_stats, y_top - 13.8 * line_h,
+    fig.text(x_stats, y_top - 16.2 * line_h,
              "Note: -100% means capital = 0",
              fontsize=8, color="red")
 
     if save_png:
         if output_path is None:
-            output_path = f"{contract_name}_xgb_f.png"
+            output_path = f"{contract_name}_xgb_w.png"
         fig.savefig(output_path, dpi=300, bbox_inches="tight")
         print(f"Figure saved to: {output_path}")
 
     plt.show()
 
 
-# Example:
+# Example usage
 plot_backtest(bt_rm, "TA", save_png=True)
-# plot_backtest(bt_sr, "TA", save_png=True)

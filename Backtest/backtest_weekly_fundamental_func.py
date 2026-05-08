@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Auto-split from the original single-contract notebooks.
+"""Backtest functions split from the original single-contract notebook.
 Core formulas, thresholds, and function bodies are kept unchanged.
 """
 
 import numpy as np
 import pandas as pd
-
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import matplotlib.ticker as mticker
 
 def backtest_money(
     df,
@@ -386,6 +387,7 @@ def backtest_money(
     df.attrs["bt_stats"] = bt_stats
 
     return df
+
 
 def plot_backtest(
     bt_df,
