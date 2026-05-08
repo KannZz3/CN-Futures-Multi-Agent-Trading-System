@@ -1,3 +1,9 @@
+# ============================================
+# features/elasticnet_selection.py
+# Elastic Net feature selection
+# Logic aligned with all other selection models
+# ============================================
+
 import numpy as np
 import pandas as pd
 
