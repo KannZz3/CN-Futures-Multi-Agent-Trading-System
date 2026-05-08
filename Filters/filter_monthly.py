@@ -1,8 +1,3 @@
-# -*- coding: utf-8 -*-
-"""Auto-split from the original single-contract notebooks.
-Core formulas, thresholds, and function bodies are kept unchanged.
-"""
-
 import numpy as np
 import pandas as pd
 
