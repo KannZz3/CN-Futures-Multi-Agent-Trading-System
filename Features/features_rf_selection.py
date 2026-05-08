@@ -1,6 +1,7 @@
 # ============================================
-# 9. Train Random Forest model
-# Logic aligned with XGB version
+# features/rf_selection.py
+# Random Forest feature selection
+# Logic aligned with xgb_selection.py
 # ============================================
 
 import numpy as np
@@ -11,7 +12,7 @@ from sklearn.metrics import (
     accuracy_score,
     roc_auc_score,
     log_loss,
-    classification_report
+    classification_report,
 )
 
 
@@ -36,6 +37,20 @@ def train_one_direction_rf(
     n_perm=5,
     max_single_check=25,
 ):
+    """
+    Train one-direction Random Forest model and select features.
+
+    This function is designed to be parallel to train_one_direction_xgb.
+    The only intended difference is the core tree algorithm:
+    RandomForestClassifier instead of XGBClassifier.
+
+    Main selection logic:
+    1. Chronological rolling train/validation windows
+    2. OOS permutation importance on validation windows
+    3. Aggregated importance across windows
+    4. Single-factor OOS AUC robustness check
+    5. Final selected feature list
+    """
 
     print(
         f"\n========== Start training {direction_name} "
@@ -62,14 +77,14 @@ def train_one_direction_rf(
         n_windows = max_w
 
     # ============================================
-    # Construct rolling train/validation windows
-    # Same as XGB version
+    # 1. Construct rolling train/validation windows
     # ============================================
     windows = []
 
     for w in range(n_windows, 0, -1):
 
         train_end = n - w * valid_size
+
         valid_start = train_end
         valid_end = train_end + valid_size
 
@@ -99,17 +114,11 @@ def train_one_direction_rf(
         c: i for i, c in enumerate(feature_cols)
     }
 
-    # ============================================
-    # Utility:
-    # check whether both classes exist
-    # ============================================
     def has_both_classes(y_arr) -> bool:
         return len(np.unique(y_arr)) > 1
 
     # ============================================
-    # Decide permutation-importance metric:
-    # AUC if all validation windows have both classes,
-    # otherwise negative logloss
+    # 2. Decide permutation-importance metric
     # ============================================
     use_auc = True
 
@@ -124,9 +133,7 @@ def train_one_direction_rf(
             use_auc = False
             break
 
-    metric_mode = (
-        "auc" if use_auc else "neg_logloss"
-    )
+    metric_mode = "auc" if use_auc else "neg_logloss"
 
     print(
         f"\n[Info] metric_mode for "
@@ -141,16 +148,14 @@ def train_one_direction_rf(
                 proba_2col[:, 1]
             )
 
-        else:
-            return -log_loss(
-                y_true,
-                proba_2col,
-                labels=[0, 1]
-            )
+        return -log_loss(
+            y_true,
+            proba_2col,
+            labels=[0, 1],
+        )
 
     # ============================================
-    # Build Random Forest classifier
-    # Only core model differs from XGB
+    # 3. Build RF model
     # ============================================
     def build_model(random_state: int):
         return RandomForestClassifier(
@@ -168,41 +173,20 @@ def train_one_direction_rf(
     window_metrics = []
 
     # ============================================
-    # Rolling OOS training / validation
+    # 4. Rolling OOS training / validation
     # ============================================
-    for w, (tr0, tr1, va0, va1) in enumerate(
-        windows,
-        1
-    ):
+    for w, (tr0, tr1, va0, va1) in enumerate(windows, 1):
 
         train_df = df.iloc[tr0:tr1]
         valid_df = df.iloc[va0:va1]
 
-        X_tr = (
-            train_df[feature_cols]
-            .to_numpy(dtype=np.float32)
-        )
+        X_tr = train_df[feature_cols].to_numpy(dtype=np.float32)
+        y_tr = train_df[target_col].to_numpy().astype(int)
 
-        y_tr = (
-            train_df[target_col]
-            .to_numpy()
-            .astype(int)
-        )
+        X_va = valid_df[feature_cols].to_numpy(dtype=np.float32)
+        y_va = valid_df[target_col].to_numpy().astype(int)
 
-        X_va = (
-            valid_df[feature_cols]
-            .to_numpy(dtype=np.float32)
-        )
-
-        y_va = (
-            valid_df[target_col]
-            .to_numpy()
-            .astype(int)
-        )
-
-        pos_ratio_tr = (
-            y_tr.mean() if len(y_tr) else np.nan
-        )
+        pos_ratio_tr = y_tr.mean() if len(y_tr) else np.nan
 
         model_w = build_model(
             random_state=2025 + 17 * w
@@ -210,23 +194,13 @@ def train_one_direction_rf(
 
         model_w.fit(X_tr, y_tr)
 
-        # ============================================
-        # OOS validation prediction
-        # ============================================
         proba_va = model_w.predict_proba(X_va)
-
         baseline = metric_score(y_va, proba_va)
 
         prob_va = proba_va[:, 1]
+        pred_va = (prob_va > 0.5).astype(int)
 
-        pred_va = (
-            (prob_va > 0.5).astype(int)
-        )
-
-        acc_va = accuracy_score(
-            y_va,
-            pred_va
-        )
+        acc_va = accuracy_score(y_va, pred_va)
 
         auc_va = (
             roc_auc_score(y_va, prob_va)
@@ -246,7 +220,7 @@ def train_one_direction_rf(
         })
 
         # ============================================
-        # Permutation importance on OOS validation set
+        # OOS permutation importance
         # ============================================
         rng = np.random.RandomState(
             2025 + 1000 * w
@@ -263,16 +237,14 @@ def train_one_direction_rf(
                 Xp = X_va.copy()
 
                 shuffled = Xp[:, j].copy()
-
                 rng.shuffle(shuffled)
-
                 Xp[:, j] = shuffled
 
                 proba_p = model_w.predict_proba(Xp)
 
                 metric_p = metric_score(
                     y_va,
-                    proba_p
+                    proba_p,
                 )
 
                 deltas.append(
@@ -291,7 +263,6 @@ def train_one_direction_rf(
         imp_by_window.append(imp_ser)
 
         print(f"\n--- W{w} OOS valid metrics ---")
-
         print(
             f"train_len={len(train_df)}, "
             f"valid_len={len(valid_df)}, "
@@ -304,24 +275,19 @@ def train_one_direction_rf(
             f"W{w} OOS permutation importance "
             f"(Top 10):"
         )
-
         print(imp_ser.head(10))
 
     # ============================================
-    # Aggregate permutation importance
-    # across all rolling windows
+    # 5. Aggregate OOS permutation importance
     # ============================================
     imp_mat = pd.concat(
         imp_by_window,
-        axis=1
+        axis=1,
     )
 
     imp_mean = imp_mat.mean(axis=1)
     imp_median = imp_mat.median(axis=1)
-
-    imp_pos_frac = (
-        (imp_mat > 0).mean(axis=1)
-    )
+    imp_pos_frac = (imp_mat > 0).mean(axis=1)
 
     importance_series = (
         imp_mean.sort_values(ascending=False)
@@ -342,35 +308,18 @@ def train_one_direction_rf(
     }))
 
     # ============================================
-    # Train final model using
-    # the latest rolling split
+    # 6. Train final model using latest rolling split
     # ============================================
     tr0, tr1, va0, va1 = windows[-1]
 
     train_df = df.iloc[tr0:tr1]
     valid_df = df.iloc[va0:va1]
 
-    X_tr = (
-        train_df[feature_cols]
-        .to_numpy(dtype=np.float32)
-    )
+    X_tr = train_df[feature_cols].to_numpy(dtype=np.float32)
+    y_tr = train_df[target_col].to_numpy().astype(int)
 
-    y_tr = (
-        train_df[target_col]
-        .to_numpy()
-        .astype(int)
-    )
-
-    X_va = (
-        valid_df[feature_cols]
-        .to_numpy(dtype=np.float32)
-    )
-
-    y_va = (
-        valid_df[target_col]
-        .to_numpy()
-        .astype(int)
-    )
+    X_va = valid_df[feature_cols].to_numpy(dtype=np.float32)
+    y_va = valid_df[target_col].to_numpy().astype(int)
 
     model = build_model(
         random_state=2025
@@ -378,16 +327,9 @@ def train_one_direction_rf(
 
     model.fit(X_tr, y_tr)
 
-    # ============================================
-    # Final OOS validation evaluation
-    # ============================================
     proba_va = model.predict_proba(X_va)
-
     prob_va = proba_va[:, 1]
-
-    pred_va = (
-        (prob_va > 0.5).astype(int)
-    )
+    pred_va = (prob_va > 0.5).astype(int)
 
     acc = accuracy_score(y_va, pred_va)
 
@@ -416,29 +358,24 @@ def train_one_direction_rf(
     print(classification_report(y_va, pred_va))
 
     # ============================================
-    # Built-in RF Gini importance
+    # 7. Built-in RF importance
     # ============================================
     gini_series = (
         pd.Series(
             model.feature_importances_,
-            index=feature_cols
+            index=feature_cols,
         )
         .sort_values(ascending=False)
     )
 
     # ============================================
-    # Feature-selection threshold:
-    # max(absolute threshold, quantile threshold)
+    # 8. Importance threshold
     # ============================================
-    thr_abs = (
-        -np.inf
-        if (imp_min is None)
-        else imp_min
-    )
+    thr_abs = -np.inf if imp_min is None else imp_min
 
     thr_quantile = (
         -np.inf
-        if (imp_quantile is None)
+        if imp_quantile is None
         else imp_mean.quantile(imp_quantile)
     )
 
@@ -465,11 +402,11 @@ def train_one_direction_rf(
     )
 
     # ============================================
-    # Single-factor OOS AUC robustness check
+    # 9. Single-factor OOS AUC check
     # ============================================
     single_check_features = (
         imp_candidates[:max_single_check]
-        if (max_single_check is not None)
+        if max_single_check is not None
         else imp_candidates
     )
 
@@ -485,8 +422,8 @@ def train_one_direction_rf(
     }
 
     if (
-        (auc_single_min is not None)
-        and (len(single_check_features) > 0)
+        auc_single_min is not None
+        and len(single_check_features) > 0
     ):
 
         print(
@@ -499,10 +436,7 @@ def train_one_direction_rf(
 
             j = col_to_j[col]
 
-            for w, (tr0, tr1, va0, va1) in enumerate(
-                windows,
-                1
-            ):
+            for w, (tr0, tr1, va0, va1) in enumerate(windows, 1):
 
                 train_df_w = df.iloc[tr0:tr1]
                 valid_df_w = df.iloc[va0:va1]
@@ -530,35 +464,25 @@ def train_one_direction_rf(
                 )
 
                 single_rf = RandomForestClassifier(
-                    n_estimators=min(
-                        200,
-                        n_estimators
-                    ),
+                    n_estimators=min(200, n_estimators),
                     max_depth=max_depth,
                     min_samples_leaf=min_samples_leaf,
                     max_features=1.0,
                     n_jobs=-1,
-                    random_state=(
-                        2025 + 31 * w + 7 * j
-                    ),
+                    random_state=2025 + 31 * w + 7 * j,
                     class_weight="balanced_subsample",
                     bootstrap=True,
                 )
 
                 try:
-                    single_rf.fit(
-                        X_tr_w,
-                        y_tr_w
-                    )
+                    single_rf.fit(X_tr_w, y_tr_w)
 
-                    proba = single_rf.predict_proba(
-                        X_va_w
-                    )
+                    proba = single_rf.predict_proba(X_va_w)
 
                     auc_w = (
                         roc_auc_score(
                             y_va_w,
-                            proba[:, 1]
+                            proba[:, 1],
                         )
                         if has_both_classes(y_va_w)
                         else np.nan
@@ -567,9 +491,7 @@ def train_one_direction_rf(
                 except Exception:
                     auc_w = np.nan
 
-                single_auc_by_window[col].append(
-                    auc_w
-                )
+                single_auc_by_window[col].append(auc_w)
 
         single_auc_mean = (
             pd.Series({
@@ -578,8 +500,7 @@ def train_one_direction_rf(
                     if len(aucs)
                     else np.nan
                 )
-                for col, aucs
-                in single_auc_by_window.items()
+                for col, aucs in single_auc_by_window.items()
             })
             .sort_values(ascending=False)
         )
@@ -590,8 +511,7 @@ def train_one_direction_rf(
                 if np.any(~np.isnan(aucs))
                 else np.nan
             )
-            for col, aucs
-            in single_auc_by_window.items()
+            for col, aucs in single_auc_by_window.items()
         })
 
         print(
@@ -608,6 +528,7 @@ def train_one_direction_rf(
         }))
 
     else:
+
         single_auc_mean = pd.Series({
             col: np.nan
             for col in feature_cols
@@ -618,38 +539,32 @@ def train_one_direction_rf(
             for col in feature_cols
         })
 
+    # ============================================
+    # 10. Final feature selection
+    # ============================================
     base_candidates = single_check_features
 
-    # ============================================
-    # Final feature selection
-    # based on single-factor OOS AUC
-    # ============================================
     if auc_single_min is not None:
 
         selected_features = [
             col
             for col in base_candidates
-
             if (
-                (col in single_auc_mean.index)
-                and (not np.isnan(single_auc_mean[col]))
-                and (
-                    single_auc_mean[col]
-                    >= auc_single_min
-                )
+                col in single_auc_mean.index
+                and not np.isnan(single_auc_mean[col])
+                and single_auc_mean[col] >= auc_single_min
             )
         ]
 
     else:
+
         selected_features = list(base_candidates)
 
     if (
-        (top_k_max is not None)
-        and (len(selected_features) > top_k_max)
+        top_k_max is not None
+        and len(selected_features) > top_k_max
     ):
-        selected_features = (
-            selected_features[:top_k_max]
-        )
+        selected_features = selected_features[:top_k_max]
 
     print(
         f"\n{direction_name} - "
@@ -666,9 +581,9 @@ def train_one_direction_rf(
     print(selected_features[:30])
 
     # ============================================
-    # Same as XGB:
-    # no full-sample prob / pred returned
-    # because they are not strictly OOS
+    # 11. Return result
+    # No full-sample prob / pred returned.
+    # They are not strictly OOS.
     # ============================================
     y_all = (
         df[target_col]
@@ -692,13 +607,14 @@ def train_one_direction_rf(
             })
             .sort_values(
                 "imp_mean",
-                ascending=False
+                ascending=False,
             )
         ),
 
         "gini_importance": gini_series,
 
         "single_auc": single_auc_mean,
+        "single_auc_min": single_auc_min,
 
         "acc": acc,
         "auc": auc,
@@ -708,8 +624,6 @@ def train_one_direction_rf(
 
         "windows": windows,
         "window_metrics": window_metrics,
-
-        "single_auc_min": single_auc_min,
     }
 
     return result
