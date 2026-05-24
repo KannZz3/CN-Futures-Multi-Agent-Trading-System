@@ -616,7 +616,7 @@ The figure below shows the author's personal trading results from **2023-06-01 t
 Key observations:
 
 - Peak net value: approximately **5×** (~400% return)
-- Peak cumulative profit: approximately **¥900,000 RMB**
+- Peak cumulative profit: approximately **¥920,000 RMB**
 - Positive equity drift across multiple Chinese commodity futures regimes
 
 
