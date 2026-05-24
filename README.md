@@ -65,37 +65,40 @@ through unified ML-based factor selection and leakage-safe backtesting.
 ```text
 CN-Futures-Multi-Agent-Trading-System/
 
-├── backtest/
-│   ├── backtest_weekly.py
-│   └── backtest_weekly_fundamental.py
+├── Backtest/
+│   ├── backtest_weekly_func.py
+│   └── backtest_weekly_fundamental_func.py
 │
-├── data/
-│   ├── daily/
-│   ├── weekly/
-│   ├── warehouse/
-│   └── basis/
+├── Price & Volume Data/       # Daily + weekly OHLCV (11 contracts)
+├── Fundmental Data/           # Warehouse receipts, spot basis, roll yield (CZCE 5)
+│   └── Processed Data/        # Weekly-frequency standardized factors
+├── Macro Data/
+│   ├── Train/                 # 2017-12 ~ 2020-06
+│   └── Test/                  # 2020-07 ~ 2023-12
 │
-├── features/
-│   ├── feature_engineering.py
-│   ├── xgb_selection.py
-│   ├── rf_selection.py
-│   ├── lgbm_selection.py
-│   ├── catboost_selection.py
-│   ├── mlp_selection.py
-│   └── elasticnet_selection.py
+├── Features/
+│   ├── features_construction.py
+│   ├── features_tag.py
+│   ├── features_direction.py
+│   ├── features_revision.py
+│   ├── features_xgb_selection.py
+│   ├── features_rf_selection.py
+│   ├── features_lgbm_selection.py
+│   ├── features_catboost_selection.py
+│   ├── features_mlp_selection.py
+│   └── features_elastic_selection.py
 │
-├── filters/
-│   ├── weekly_filter.py
-│   ├── warehouse_filter.py
-│   └── basis_filter.py
+├── Filters/
+│   ├── filter_weekly.py
+│   ├── filter_fundamental.py
+│   └── filter_monthly.py
 │
-├── scores/
-│   ├── infer_factor_sign.py
-│   └── add_score.py
+├── Score/
+│   ├── score_fun.py
+│   └── base_th.py
 │
-├── notebooks/
-├── reports/
-├── results/
+├── Single-Contract Full Pipeline--Technical + Weekly Filters.ipynb
+├── Single-Contract Full Pipeline--Technical + Fundamental Factors.ipynb
 └── README.md
 ```
 
@@ -103,17 +106,21 @@ CN-Futures-Multi-Agent-Trading-System/
 
 # Trading Universe
 
-Current research focuses on major Chinese commodity futures contracts:
+Current research covers major Chinese commodity futures contracts:
 
 | Exchange | Contracts |
 |---|---|
 | CZCE | TA / MA / FG / RM / SR |
+| SHFE | AG / AU / CU / HC / RU |
+| CZCE | CF |
 
-These contracts were selected due to:
+CZCE contracts (TA / MA / FG / RM / SR) carry full fundamental data coverage (warehouse receipts, spot basis, roll yield). SHFE contracts are included for technical-signal research.
+
+Contracts were selected due to:
 
 - Sufficient liquidity
 - Long historical availability
-- Strong inventory/basis relevance
+- Strong inventory/basis relevance (CZCE subset)
 - Representative industrial-chain behavior
 
 ---
@@ -125,7 +132,7 @@ Adjusted Daily Futures Data
         ↓
 Feature Engineering
         ↓
-Forward Return Label Construction
+Forward Return Label Construction  (H = 5 days, TH = 5%)
         ↓
 ML Feature Selection
         ↓
@@ -313,6 +320,8 @@ to determine whether the factor contributes positively or negatively to:
 - long-side prediction
 - short-side prediction
 
+Sign inference combines five criteria — quantile bucketing, IC sign, Spearman monotonicity, OLS regression direction, and bootstrap stability — and outputs +1 / −1 / 0 (discard) based on a confidence vote.
+
 The framework therefore separates:
 
 ```text
@@ -337,9 +346,9 @@ score_short
 through:
 
 - train-only normalization
-- z-score transformation
+- z-score transformation (robust median/MAD)
 - inferred factor direction
-- weighted aggregation
+- correlation-filtered weighted aggregation
 
 The framework intentionally avoids:
 
@@ -348,6 +357,8 @@ Single symmetric score construction
 ```
 
 because long and short futures behavior is often asymmetric.
+
+Signal entry thresholds are **volatility-adaptive**: `base_th` scales linearly with the contract's median rolling volatility estimated from training data.
 
 ---
 
@@ -383,7 +394,7 @@ This prevents aggressive trading during unstable environments.
 
 ---
 
-## Crowded Long Filter
+## Crowded Long / Short Filter
 
 Combines:
 
@@ -456,6 +467,8 @@ Regime gates
 
 instead of direct price predictors.
 
+Fundamental factors are lagged by one week before merging into daily data to prevent weekly information leakage.
+
 ---
 
 # 8. Leakage-Safe Research Design
@@ -493,12 +506,10 @@ The project includes a capital-based CTA-style backtesting engine with:
 - Long/short trading
 - Leverage control
 - Position sizing
-- Stop-loss
-- Take-profit
-- Trailing stop
+- Stop-loss / take-profit
 - Maximum holding period
 - Weekly gating
-- Fundamental gating
+- Fundamental gating (warehouse + basis)
 
 The engine records:
 
