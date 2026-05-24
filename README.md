@@ -611,7 +611,7 @@ This framework is informed by the author's live trading experience in Chinese co
 
 The figure below shows the author's personal trading results from **2023-06-01 to 2024-06-01**, recorded through a verified brokerage account at **华安期货 (Huaan Futures)**. The results are independent of this research repository and are provided solely as context for the author's practical market background.
 
-![Live Trading Performance — 2023-06 to 2024-06](Backtest/real_trading_result.png)
+![Live Trading Performance — 2023-06 to 2024-06](Backtest/real_trading_result.jpg)
 
 Key observations:
 
