@@ -605,6 +605,21 @@ rather than direct reproductions.
 
 ---
 
+# About the Author
+
+This framework is informed by the author's live trading experience in Chinese commodity futures markets.
+
+The figure below shows the author's personal trading results from **2023-06-01 to 2024-06-01**, recorded through a verified brokerage account at **华安期货 (Huaan Futures)**. The results are independent of this research repository and are provided solely as context for the author's practical market background.
+
+![Live Trading Performance — 2023-06 to 2024-06](Backtest/real_trading_result.png)
+
+Key observations:
+
+- Peak net value: approximately **5×** (~400% return)
+- Peak cumulative profit: approximately **¥900,000 RMB**
+- Positive equity drift across multiple Chinese commodity futures regimes
+
+
 # Disclaimer
 
 This repository is intended solely for:
