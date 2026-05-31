@@ -1,10 +1,16 @@
 # CN Futures Multi-Agent Trading System
 
-# About the Author
+A modular quantitative research framework for Chinese commodity futures trading, focused on combining live-market intuition, machine-learning-based factor selection, leakage-safe validation, and multi-agent decision architecture.
 
-This framework is informed by the author's live trading experience in Chinese commodity futures markets.
+This repository is built around a practical trading problem: how to identify medium-frequency directional opportunities in Chinese commodity futures when liquidity, open interest, capital concentration, fundamental pressure, and technical trend begin to align.
 
-The figure below shows the author's personal trading results from **2023-06-01 to 2024-06-01**, recorded through a verified brokerage account at **华安期货 (Huaan Futures)**. The results are independent of this research repository and are provided solely as context for the author's practical market background.
+---
+
+## About the Author
+
+This framework is informed by the author's live trading experience in Chinese commodity futures markets. Before formalizing the system into a research framework, the author developed and applied a discretionary futures trading process centered on full-market screening, abnormal open interest, capital accumulation, long-short positioning intensity, and fundamental confirmation of deliverable commodities.
+
+The figure below shows the author's personal trading results from **2023-06-01 to 2024-06-01**, recorded through a verified brokerage account at **华安期货 (Huaan Futures)**. These results are independent of this research repository and are provided only as background context for the author's practical market experience.
 
 ![Live Trading Performance — 2023-06 to 2024-06](Backtest/real_trading_result.jpg)
 
@@ -14,7 +20,11 @@ Key observations:
 - Peak cumulative profit: approximately **¥920,000 RMB**
 - Positive equity drift across multiple Chinese commodity futures regimes
 
-A modular quantitative research framework for Chinese commodity futures trading, focused on:
+The research framework in this repository is an attempt to systematize that practical trading logic into a more structured, testable, and extensible pipeline. Instead of relying only on discretionary judgment, the system separates the trading process into market screening, factor selection, regime filtering, signal validation, and risk control modules.
+
+---
+
+## Framework Focus
 
 - Machine-learning-based factor selection
 - Leakage-safe medium-frequency research
@@ -22,8 +32,6 @@ A modular quantitative research framework for Chinese commodity futures trading,
 - Technical + fundamental signal integration
 - Weekly regime-aware risk filtering
 - Robust out-of-sample validation
-
----
 
 ## System Architecture
 
