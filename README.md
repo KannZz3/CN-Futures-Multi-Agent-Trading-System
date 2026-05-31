@@ -1,5 +1,4 @@
 # CN Futures Multi-Agent Trading System  
-# 中国期货多智能体交易系统
 
 A modular quantitative research framework for Chinese commodity futures trading. The project aims to systematize live-market trading logic into a testable, leakage-safe, and extensible research pipeline.
 
@@ -37,11 +36,6 @@ Key observations:
 - Positive equity drift across multiple Chinese commodity futures regimes  
   在多个中国商品期货市场环境中保持正向权益漂移
 
-This repository attempts to translate that practical trading logic into a structured research system. Instead of relying only on discretionary judgment, the framework separates the trading process into market screening, feature selection, factor direction inference, regime filtering, signal construction, and risk-controlled backtesting.
-
-本仓库的目标，是将上述实盘交易逻辑转化为更加结构化、可回测、可复用的研究系统。与单纯依赖主观判断不同，该框架将交易流程拆分为市场筛选、特征选择、因子方向判断、市场状态过滤、信号构建与风险控制回测等模块。
-
----
 
 ## 2. Research Motivation  
 ## 2. 研究动机
