@@ -363,11 +363,11 @@ Potential future extensions include:
 
 未来可能扩展方向包括：
 
+- Contract-level signal transferability  
+  合约层面信号可迁移性研究
+
 - Multi-contract portfolio optimization  
   多合约组合优化
-
-- Cross-sectional futures selection  
-  横截面期货品种筛选
 
 - Portfolio-level risk allocation  
   组合层面风险分配
@@ -377,9 +377,6 @@ Potential future extensions include:
 
 - Multi-frequency integration  
   多频率信号整合
-
-- Reinforcement-learning overlays  
-  强化学习模块叠加
 
 - LLM-assisted macro/fundamental agents  
   LLM 辅助宏观与基本面 Agent
